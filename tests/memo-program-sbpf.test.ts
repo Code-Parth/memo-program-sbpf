@@ -4,6 +4,8 @@ import {
   PublicKey,
   Transaction,
   LAMPORTS_PER_SOL,
+  TransactionMessage,
+  VersionedTransaction,
   TransactionInstruction,
 } from "@solana/web3.js";
 import type {
@@ -85,12 +87,19 @@ const signAndSend = async (
   signers: Keypair[] = [signer]
 ): Promise<TransactionSignature> => {
   const block = await connection.getLatestBlockhash();
-  tx.recentBlockhash = block.blockhash;
-  tx.lastValidBlockHeight = block.lastValidBlockHeight;
-  const signature: TransactionSignature = await connection.sendTransaction(
-    tx,
-    signers
-  );
+
+  const messageV0 = new TransactionMessage({
+    payerKey: signers[0].publicKey,
+    recentBlockhash: block.blockhash,
+    instructions: tx.instructions,
+  }).compileToV0Message();
+
+  const versionedTx = new VersionedTransaction(messageV0);
+
+  versionedTx.sign(signers);
+
+  const signature = await connection.sendTransaction(versionedTx);
+
   return signature;
 };
 
@@ -115,23 +124,12 @@ const getTransactionLogs = async (
  * @param amountSol - Amount of SOL to request (default: 1)
  * @returns Promise that resolves when airdrop is confirmed
  */
-const airdropSol = async (
-  publicKey: PublicKey,
-  amountSol: number = 1
-): Promise<void> => {
-  const lamports: number = amountSol * LAMPORTS_PER_SOL;
-  const airdropSignature: TransactionSignature =
-    await connection.requestAirdrop(publicKey, lamports);
-  const latestBlockhash = await connection.getLatestBlockhash();
-  await connection.confirmTransaction({
-    signature: airdropSignature,
-    blockhash: latestBlockhash.blockhash,
-    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-  });
+const airdropSol = async (publicKey: PublicKey, amountSol = 1) => {
+  const lamports = amountSol * LAMPORTS_PER_SOL;
+  const signature = await connection.requestAirdrop(publicKey, lamports);
+  await confirm(signature);
   console.log(
-    `    ✓ Airdropped ${amountSol} SOL to ${publicKey
-      .toBase58()
-      .slice(0, 8)}...`
+    `✓ Airdropped ${amountSol} SOL to ${publicKey.toBase58().slice(0, 8)}...`
   );
 };
 
@@ -140,8 +138,13 @@ const airdropSol = async (
  * @param error - Error object from failed transaction
  * @returns Typed ProgramErrorCode or null if not found
  */
-const extractErrorCode = (error: any): ProgramErrorCode | null => {
-  const errorMessage: string = error?.message || "";
+const extractErrorCode = (error: unknown): ProgramErrorCode | null => {
+  // Ensure error is an object with a string 'message' property
+  if (typeof error !== "object" || error === null) return null;
+  if (!("message" in error)) return null;
+
+  const errObj = error as { message: string };
+  const errorMessage = errObj.message || "";
 
   // Match patterns like "custom program error: 0x1" or "0x2"
   const hexMatch = errorMessage.match(
@@ -149,10 +152,9 @@ const extractErrorCode = (error: any): ProgramErrorCode | null => {
   );
 
   if (hexMatch) {
-    const hexValue: string = hexMatch[1];
-    const errorCode: number = parseInt(hexValue, 16);
+    const hexValue = hexMatch[1];
+    const errorCode = parseInt(hexValue, 16);
 
-    // Validate using type guard
     if (isProgramErrorCode(errorCode)) {
       return errorCode as ProgramErrorCode;
     }
@@ -175,13 +177,14 @@ const getErrorMessage = (code: ProgramErrorCode): string => {
  * @param error - Raw error from transaction
  * @returns Typed TransactionError object
  */
-const createTransactionError = (error: any): TransactionError => {
-  const code = extractErrorCode(error);
+const createTransactionError = (error: unknown): TransactionError => {
+  const err = error as { message?: string; logs?: string[] };
+  const code = extractErrorCode(err);
 
   return {
-    message: error?.message || "Unknown error",
+    message: err?.message || "Unknown error",
     code: code ?? undefined,
-    logs: error?.logs,
+    logs: err?.logs,
   };
 };
 
@@ -330,10 +333,10 @@ describe("Memo Program (sBPF Assembly)", () => {
 
       // If we reach here, the test should fail
       expect.fail("Transaction should have failed without a signer!");
-    } catch (error: any) {
+    } catch (error) {
       // We expect an error - that's success!
       console.log(`  ✓ Transaction rejected as expected`);
-      console.log(`  Error: ${error.message.split("\n")[0]}`);
+      console.log(`  Error: ${(error as Error).message.split("\n")[0]}`);
 
       // Extract and validate error code
       const errorCode: ProgramErrorCode | null = extractErrorCode(error);
@@ -351,7 +354,7 @@ describe("Memo Program (sBPF Assembly)", () => {
       }
 
       // Verify it's a program error
-      expect(error.message).to.match(
+      expect((error as Error).message).to.match(
         /failed|error/i,
         "Error should indicate transaction failure"
       );
@@ -393,9 +396,9 @@ describe("Memo Program (sBPF Assembly)", () => {
       await signAndSend(tx).then(confirm);
 
       expect.fail("Transaction should have failed with empty memo!");
-    } catch (error: any) {
+    } catch (error) {
       console.log(`  ✓ Transaction rejected as expected`);
-      console.log(`  Error: ${error.message.split("\n")[0]}`);
+      console.log(`  Error: ${(error as Error).message.split("\n")[0]}`);
 
       // Extract and validate error code
       const errorCode: ProgramErrorCode | null = extractErrorCode(error);
@@ -413,7 +416,7 @@ describe("Memo Program (sBPF Assembly)", () => {
       }
 
       // Our assembly program returns error code 2 for empty memos
-      expect(error.message).to.match(
+      expect((error as Error).message).to.match(
         /failed|error/i,
         "Error should indicate transaction failure"
       );
