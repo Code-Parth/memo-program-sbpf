@@ -51,10 +51,8 @@ export interface TestConfig {
 export enum ProgramErrorCode {
   /** Transaction succeeded */
   Success = 0,
-  /** No signers found in transaction */
-  NoSigners = 1,
   /** Memo text is empty */
-  EmptyMemo = 2,
+  EmptyMemo = 1,
 }
 
 /**
@@ -62,8 +60,6 @@ export enum ProgramErrorCode {
  */
 export const ErrorMessages: Record<ProgramErrorCode, string> = {
   [ProgramErrorCode.Success]: "Transaction succeeded",
-  [ProgramErrorCode.NoSigners]:
-    "No signers found - at least one signer required",
   [ProgramErrorCode.EmptyMemo]: "Empty memo - memo text cannot be empty",
 };
 

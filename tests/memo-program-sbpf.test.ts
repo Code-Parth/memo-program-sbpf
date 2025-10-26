@@ -294,14 +294,16 @@ describe("Memo Program (sBPF Assembly)", () => {
   });
 
   // ========================================================================
-  // TEST 2: Memo Without Signer (FAILURE CASE)
+  // TEST 2: Memo Without Signer (SUCCESS CASE - Optimized Program)
   // ========================================================================
-  it("should reject a memo without a signer", async function () {
+  it("should accept a memo without a signer", async function () {
     this.timeout(10000);
 
-    console.log("\n🚫 Test 2: Memo without signer (should fail)");
+    console.log(
+      "\n✅ Test 2: Memo without signer (optimized - no signer required)"
+    );
 
-    const memoText: string = "This should fail - no signer!";
+    const memoText: string = "No signer required - optimized!";
     const memoData: Buffer = Buffer.from(memoText, "utf-8");
 
     // Create a read-only account (not a signer)
@@ -314,7 +316,7 @@ describe("Memo Program (sBPF Assembly)", () => {
       keys: [
         {
           pubkey: readOnlyAccount.publicKey,
-          isSigner: false, // ✗ NOT a signer - assembly should reject!
+          isSigner: false, // ✓ NOT a signer - optimized assembly accepts this!
           isWritable: false,
         },
       ],
@@ -326,41 +328,22 @@ describe("Memo Program (sBPF Assembly)", () => {
     tx.add(memoInstruction);
 
     // --------------------------------------------------------------------
-    // Attempt to send - this should fail!
+    // Send transaction - should succeed with optimized assembly
     // --------------------------------------------------------------------
-    try {
-      await signAndSend(tx).then(confirm);
+    const signature: TransactionSignature = await signAndSend(tx).then(confirm);
+    console.log(`  ✓ Transaction accepted without signer`);
 
-      // If we reach here, the test should fail
-      expect.fail("Transaction should have failed without a signer!");
-    } catch (error) {
-      // We expect an error - that's success!
-      console.log(`  ✓ Transaction rejected as expected`);
-      console.log(`  Error: ${(error as Error).message.split("\n")[0]}`);
+    // --------------------------------------------------------------------
+    // Verify the memo was logged
+    // --------------------------------------------------------------------
+    const logs: string[] = await getTransactionLogs(signature);
+    const memoLogged: boolean = logs.some((log: string) =>
+      log.includes(memoText)
+    );
 
-      // Extract and validate error code
-      const errorCode: ProgramErrorCode | null = extractErrorCode(error);
+    expect(memoLogged, "Memo should be logged even without signer").to.be.true;
 
-      expect(errorCode).to.not.be.null;
-      expect(errorCode).to.equal(
-        ProgramErrorCode.NoSigners,
-        "Should return NoSigners error code (0x1)"
-      );
-
-      // Display human-readable error message
-      if (errorCode !== null) {
-        const errorMsg: string = getErrorMessage(errorCode);
-        console.log(`  ✓ Error code: ${errorCode} - ${errorMsg}`);
-      }
-
-      // Verify it's a program error
-      expect((error as Error).message).to.match(
-        /failed|error/i,
-        "Error should indicate transaction failure"
-      );
-    }
-
-    console.log(`  ✓ Signer validation working!\n`);
+    console.log(`  ✓ Memo logged successfully without signer!\n`);
   });
 
   // ========================================================================
@@ -406,7 +389,7 @@ describe("Memo Program (sBPF Assembly)", () => {
       expect(errorCode).to.not.be.null;
       expect(errorCode).to.equal(
         ProgramErrorCode.EmptyMemo,
-        "Should return EmptyMemo error code (0x2)"
+        "Should return EmptyMemo error code (0x1)"
       );
 
       // Display human-readable error message
@@ -635,8 +618,7 @@ describe("Memo Program (sBPF Assembly)", () => {
     console.log(`  Testing ProgramErrorCode enum...`);
 
     expect(ProgramErrorCode.Success).to.equal(0);
-    expect(ProgramErrorCode.NoSigners).to.equal(1);
-    expect(ProgramErrorCode.EmptyMemo).to.equal(2);
+    expect(ProgramErrorCode.EmptyMemo).to.equal(1);
 
     console.log(`    ✓ All error codes have correct values`);
 
@@ -647,9 +629,6 @@ describe("Memo Program (sBPF Assembly)", () => {
 
     expect(ErrorMessages[ProgramErrorCode.Success]).to.equal(
       "Transaction succeeded"
-    );
-    expect(ErrorMessages[ProgramErrorCode.NoSigners]).to.equal(
-      "No signers found - at least one signer required"
     );
     expect(ErrorMessages[ProgramErrorCode.EmptyMemo]).to.equal(
       "Empty memo - memo text cannot be empty"
@@ -664,7 +643,7 @@ describe("Memo Program (sBPF Assembly)", () => {
 
     expect(isProgramErrorCode(0)).to.be.true;
     expect(isProgramErrorCode(1)).to.be.true;
-    expect(isProgramErrorCode(2)).to.be.true;
+    expect(isProgramErrorCode(2)).to.be.false;
     expect(isProgramErrorCode(3)).to.be.false;
     expect(isProgramErrorCode(-1)).to.be.false;
     expect(isProgramErrorCode(999)).to.be.false;
@@ -679,18 +658,18 @@ describe("Memo Program (sBPF Assembly)", () => {
     const mockError1 = {
       message: "Transaction failed: custom program error: 0x1",
     };
-    const mockError2 = {
-      message: "Transaction failed: custom program error: 0x2",
+    const mockError2 = { message: "Generic error without code" };
+    const mockError3 = {
+      message: "Transaction failed: custom program error: 0x2", // Invalid code
     };
-    const mockError3 = { message: "Generic error without code" };
 
     const code1: ProgramErrorCode | null = extractErrorCode(mockError1);
     const code2: ProgramErrorCode | null = extractErrorCode(mockError2);
     const code3: ProgramErrorCode | null = extractErrorCode(mockError3);
 
-    expect(code1).to.equal(ProgramErrorCode.NoSigners);
-    expect(code2).to.equal(ProgramErrorCode.EmptyMemo);
-    expect(code3).to.be.null;
+    expect(code1).to.equal(ProgramErrorCode.EmptyMemo);
+    expect(code2).to.be.null;
+    expect(code3).to.be.null; // 0x2 no longer valid error code
 
     console.log(`    ✓ Error extraction works correctly`);
 
@@ -701,9 +680,6 @@ describe("Memo Program (sBPF Assembly)", () => {
 
     expect(getErrorMessage(ProgramErrorCode.Success)).to.equal(
       ErrorMessages[ProgramErrorCode.Success]
-    );
-    expect(getErrorMessage(ProgramErrorCode.NoSigners)).to.equal(
-      ErrorMessages[ProgramErrorCode.NoSigners]
     );
     expect(getErrorMessage(ProgramErrorCode.EmptyMemo)).to.equal(
       ErrorMessages[ProgramErrorCode.EmptyMemo]
@@ -717,7 +693,7 @@ describe("Memo Program (sBPF Assembly)", () => {
     console.log(`  Testing createTransactionError function...`);
 
     const mockErrorWithCode = {
-      message: "Failed: custom program error: 0x2",
+      message: "Failed: custom program error: 0x1",
       logs: ["Log 1", "Log 2"],
     };
 

@@ -4,12 +4,12 @@ A Solana memo program written in pure sBPF assembly with type safety and test co
 
 ## Overview
 
-This project demonstrates how to build Solana programs directly in assembly language. The memo program accepts text messages, validates the signers, and is implemented in assembly.
+This project demonstrates how to build Solana programs directly in assembly language. The memo program accepts text messages and logs them to the blockchain, implemented in sBPF assembly.
 
 ## Features
 
 - [x] **Pure sBPF Assembly** - Written directly in assembly
-- [x] **Signer Validation** - Ensures at least one account signed the transaction
+- [x] **No Signer Requirement** - Accepts 0+ accounts (matches official Solana Memo Program)
 - [x] **Empty Memo Protection** - Rejects transactions with no memo text
 - [x] **Type-Safe TypeScript** - type definitions with runtime validation
 - [x] **Comprehensive Testing** - 7 test cases covering all scenarios
@@ -20,9 +20,9 @@ This project demonstrates how to build Solana programs directly in assembly lang
 
 1. **Clone the repository**
 
-  ```bash
-  git clone https://github.com/Code-Parth/memo-program-sbpf.git
-  ```
+   ```bash
+   git clone https://github.com/Code-Parth/memo-program-sbpf.git
+   ```
 
    ```bash
    cd memo-program-sbpf
@@ -96,13 +96,13 @@ sbpf e2e
 
 ### Assembly Program Logic
 
-The memo program (`src/memo-program-ts/memo-program-ts.s`) follows this flow:
+The memo program (`src/memo-program-sbpf/memo-program-sbpf.s`) follows this flow:
 
-1. **Read Account Count** - Validate at least one account exists
-2. **Iterate Accounts** - Check each account for signer flag
-3. **Validate Signer** - Ensure at least one signer found (error 0x1 if not)
+1. **Read Account Count** - Load number of accounts from input buffer
+2. **Fast Path Check** - If zero accounts, jump directly to instruction data
+3. **Skip Accounts** - Efficiently iterate through accounts (real and duplicate) to reach instruction data
 4. **Read Memo Data** - Extract instruction data length and pointer
-5. **Validate Length** - Ensure memo is not empty (error 0x2 if empty)
+5. **Validate Length** - Ensure memo is not empty (error 0x1 if empty)
 6. **Log Memo** - Call `sol_log_` syscall to log the memo text
 7. **Return Success** - Exit with code 0
 
@@ -152,15 +152,15 @@ add64 r7, r3                            # Add data_len
 
 The project includes 7 comprehensive tests:
 
-| #   | Test Name              | Description                   | Expected Result    |
-| --- | ---------------------- | ----------------------------- | ------------------ |
-| 1   | Valid memo with signer | Standard memo operation       | ✅ Success         |
-| 2   | Memo without signer    | No signer account             | ❌ Error 0x1       |
-| 3   | Empty memo             | Zero-length instruction data  | ❌ Error 0x2       |
-| 4   | Long memo (256+ chars) | Large instruction data        | ✅ Success         |
-| 5   | Multiple memos         | 3 memos in one transaction    | ✅ All logged      |
-| 6   | Multiple signers       | 3 signers on one memo         | ✅ Success         |
-| 7   | Type validation        | TypeScript type safety checks | ✅ All types valid |
+| #   | Test Name                 | Description                        | Expected Result    |
+| --- | ------------------------- | ---------------------------------- | ------------------ |
+| 1   | Valid memo with signer    | Standard memo operation            | ✅ Success         |
+| 2   | Memo without signer       | No signer required (optimized)     | ✅ Success         |
+| 3   | Empty memo                | Zero-length instruction data       | ❌ Error 0x1       |
+| 4   | Long memo (256+ chars)    | Large instruction data             | ✅ Success         |
+| 5   | Multiple memos            | 3 memos in one transaction         | ✅ All logged      |
+| 6   | Multiple signers          | 3 signers on one memo              | ✅ Success         |
+| 7   | Type validation           | TypeScript type safety checks      | ✅ All types valid |
 
 ### Running Tests
 
@@ -177,8 +177,7 @@ sbpf e2e
 | Code | Hex | Name      | Description                              |
 | ---- | --- | --------- | ---------------------------------------- |
 | 0    | 0x0 | Success   | Transaction completed successfully       |
-| 1    | 0x1 | NoSigners | No signer accounts found in transaction  |
-| 2    | 0x2 | EmptyMemo | Instruction data is empty (no memo text) |
+| 1    | 0x1 | EmptyMemo | Instruction data is empty (no memo text) |
 
 ## Development
 
